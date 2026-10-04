@@ -37,3 +37,20 @@ pip install genvm-linter genlayer-test
 genvm-lint check PriceGuard.py
 genvm-lint typecheck PriceGuard.py
 pytest -q # 18 tests
+
+## Recommended multi-source setup (keyless exchanges)
+Free aggregator APIs can rate-limit or block validators (we observed HTTP 429/403 from
+CoinGecko and HTTP 401 from CryptoCompare on Bradbury). The contract rejects such rounds
+instead of storing bad data. Three keyless exchange sources worked on Bradbury:
+SRC3='json:[{"url":"https://api.coinbase.com/v2/prices/BTC-USD/spot","path":"data.amount","ts_path":""},{"url":"https://api.kraken.com/0/public/Ticker?pair=XBTUSD","path":"result.XXBTZUSD.c.0","ts_path":""},{"url":"https://www.bitstamp.net/api/v2/ticker/btcusd/","path":"last","ts_path":""}]'
+genlayer write CONTRACT addAllowedHost --args api.coinbase.com # also api.kraken.com, www.bitstamp.net
+genlayer write CONTRACT registerAsset --args BTC3 "$SRC3" 2 300 200 3000
+genlayer write CONTRACT updatePrice --args BTC3
+
+## Multi-source evidence (Bradbury)
+- 3-source update, median stored, `sources=3`: `0xa5acaabc4b35d9faff70ac8e153e17b9b4428bc48543efef06c8d99b4daa20b5`
+- Host not on the allowlist is rejected: `0xc958ff0b64190f433855533331ae940eebe5ba7586f423fca478db7f14b8056b`
+- `min_sources` enforced (one source returned HTTP 401, no price stored): `0x4df6c39b15398bab05dba3ea7656276913e94045991b206be7e8689f0618c539`
+
+Not covered on-chain: the max-deviation rejection (covered by local tests) and the LLM
+fallback (`path` empty), which has no tests yet.
