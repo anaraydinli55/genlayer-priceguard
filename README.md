@@ -1,8 +1,23 @@
 # PriceGuard
 
 Multi-source price oracle for GenLayer. Validators independently fetch the registered
-sources, and consensus is reached on the normalized price (integer micro-USD) within a
-tolerance. Invalid data never becomes a price.
+sources, and consensus is reached on a **canonical price**: the median (integer micro-USD)
+rounded to 4 significant digits. Validators require **exact equality** of that canonical
+value, and only that value is stored, so the stored oracle price is exactly what validators
+bound. Invalid data never becomes a price.
+
+## Consensus design (v3)
+- v2 let validators accept a leader price "within tolerance" of their own, while the leader's
+  raw price was stored. Two materially different prices could both pass consensus.
+- v3: leader and validators both compute `canon(median)` and the validator accepts only on
+  `leader.price == mine.price` (no tolerance). Storage, history and the circuit breaker use
+  only this canonical value. The per-source count is no longer taken from the leader; the
+  stored `sources` is the configured `min_sources`, a lower bound every validator enforced.
+- `max_dev_bps` is only used to reject rounds where the sources disagree with each other; it
+  plays no role in validator agreement.
+- Trade-off (fails safe): if validators land on opposite sides of a bucket edge the round is
+  rejected. This costs liveness, never correctness: a wrong price is never written.
+- Canonical bucket example: 84848.00 -> 84850.00 (about 0.01% granularity at BTC prices).
 
 ## Deployment
 - Network: GenLayer Bradbury Testnet (chain ID 4221)
@@ -13,6 +28,7 @@ tolerance. Invalid data never becomes a price.
 ## Oracle controls
 - Up to 3 sources per asset, median price, reject if a source deviates more than `max_dev_bps`
 - Host allowlist (https only), managed by the owner
+- Exact-equality consensus on a canonical price (see Consensus design)
 - Source timestamp freshness check (`max_age_sec`)
 - Normalization to integer micro-USD, rejects zero, negative and non-finite values
 - Price-jump circuit breaker (`max_jump_bps`), owner can `resetPrice`
@@ -36,7 +52,7 @@ The `json:` prefix is needed because the CLI turns arguments starting with `[` i
 pip install genvm-linter genlayer-test
 genvm-lint check PriceGuard.py
 genvm-lint typecheck PriceGuard.py
-pytest -q # 18 tests
+pytest -q # 24 tests
 
 ## Recommended multi-source setup (keyless exchanges)
 Free aggregator APIs can rate-limit or block validators (we observed HTTP 429/403 from
@@ -54,3 +70,7 @@ genlayer write CONTRACT updatePrice --args BTC3
 
 Not covered on-chain: the max-deviation rejection (covered by local tests) and the LLM
 fallback (`path` empty), which has no tests yet.
+
+## v3 evidence (Bradbury)
+Deployed contract, deploy tx and round hashes are added here after redeploy (see the
+Bradbury proof list in the contribution notes).
