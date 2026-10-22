@@ -12,7 +12,10 @@ Flow of updatePrice(symbol):
              freshness, normalises to integer micro-USD, takes the median
              and rejects the round if the sources disagree.
   validator: independently re-runs the same collection and agrees only if
-             the status matches and the prices are within tolerance.
+             the status matches and the CANONICAL price is exactly equal.
+             The canonical price is the median rounded to CANON_SIG_DIGITS
+             significant digits, so the value validators bind is the very
+             value that gets stored (no tolerance, no unbound leader value).
   result   : "ok"      -> price + history are stored
              "invalid" -> price is NOT touched, the reason is stored in
                           last_error so bad data can never become a price.
@@ -24,6 +27,7 @@ ERROR_LLM = "[LLM_ERROR]"
 MICRO = 1_000_000            # prices are stored as integer micro-USD
 HISTORY_LIMIT = 50
 MAX_SOURCES = 3
+CANON_SIG_DIGITS = 4         # consensus bucket: price rounded to 4 significant digits
 MIN_UPDATE_INTERVAL = 30     # seconds between two updates of one asset
 DEFAULT_HOSTS = [
     "api.coingecko.com",
@@ -95,6 +99,18 @@ def _to_micro(value) -> int:
     return int(round(number * MICRO))
 
 
+def _canon(micro: int, sig_digits: int = CANON_SIG_DIGITS) -> int:
+    """Deterministic canonical price: round half up to `sig_digits` significant
+    digits (integer math only). Validators must match this value EXACTLY, so
+    the stored oracle value is bound by consensus."""
+    digits = len(str(micro))
+    if digits <= sig_digits:
+        return micro
+    unit = 10 ** (digits - sig_digits)
+    canon = ((micro + unit // 2) // unit) * unit
+    return canon
+
+
 def _fmt(micro: int) -> str:
     return f"{micro // MICRO}.{micro % MICRO:06d}"
 
@@ -160,7 +176,8 @@ def _collect(sources, min_sources: int, max_age: int, max_dev_bps: int, tx_time:
         if abs(p - median) * 10000 > median * max_dev_bps:
             return {"status": "invalid", "reason": "sources disagree"}
 
-    return {"status": "ok", "price": median, "sources": len(prices)}
+    # Only the canonical price leaves the nondeterministic block.
+    return {"status": "ok", "price": _canon(median)}
 
 
 # --------------------------------------------------------------- contract
@@ -317,9 +334,9 @@ class PriceGuard(gl.Contract):
                 return False
             if leader["status"] != "ok":
                 return True  # both rejected the data
-            lp = int(leader["price"])
-            mp = int(mine["price"])
-            return abs(lp - mp) * 10000 <= max(lp, mp) * max_dev_bps
+            # Exact equality on the canonical price: no tolerance, so the value
+            # that is stored below is exactly what every validator computed.
+            return int(leader["price"]) == int(mine["price"])
 
         result = gl.vm.run_nondet_unsafe(leader_fn, validator_fn)
 
@@ -335,7 +352,8 @@ class PriceGuard(gl.Contract):
         self.prices[symbol] = json.dumps(
             {
                 "price": new_price,
-                "sources": int(result["sources"]),
+                # every validator required >= min_sources valid sources
+                "sources": min_sources,
                 "updated_at": tx_time,
             }
         )

@@ -50,14 +50,78 @@ def test_update_ok_and_validator(pg, direct_vm):
     mock(direct_vm, r"coingecko", cg_body(65000.5))
     pg.updatePrice("BTC")
     p = pg.getPrice("BTC")
-    assert p["price"] == "65000.500000" and p["sources"] == "1"
+    # stored value is the canonical (4 significant digits) price, not the raw one
+    assert p["price"] == "65000.000000" and p["sources"] == "1"
     assert direct_vm.run_validator() is True
-    # validator sees a slightly different price (within 2%) -> agree
-    direct_vm.clear_mocks(); mock(direct_vm, r"coingecko", cg_body(65100.0))
+    # same canonical bucket (65000) -> agree
+    direct_vm.clear_mocks(); mock(direct_vm, r"coingecko", cg_body(65004.0))
     assert direct_vm.run_validator() is True
-    # validator sees a very different price -> disagree
-    direct_vm.clear_mocks(); mock(direct_vm, r"coingecko", cg_body(70000.0))
+
+
+def test_validator_rejects_within_old_tolerance_but_different_bucket(pg, direct_vm):
+    """Steward feedback: 65000 vs 65100 is only 0.15% apart (inside dev=2%),
+    but they are different oracle values, so consensus must fail."""
+    reg(pg)
+    mock(direct_vm, r"coingecko", cg_body(65000.0))
+    pg.updatePrice("BTC")
+    for other in (65100.0, 70000.0, 65010.0):
+        direct_vm.clear_mocks(); mock(direct_vm, r"coingecko", cg_body(other))
+        assert direct_vm.run_validator() is False
+
+
+def test_stored_value_equals_validator_bound_value(pg, direct_vm):
+    """Whatever the validator accepts must equal what is stored."""
+    reg(pg)
+    mock(direct_vm, r"coingecko", cg_body(84848.0))
+    pg.updatePrice("BTC")
+    stored = pg.getPrice("BTC")["price_micro"]
+    assert stored == "84850000000"           # 84848 -> 84850 (4 sig digits)
+    assert direct_vm.run_validator() is True
+    direct_vm.clear_mocks(); mock(direct_vm, r"coingecko", cg_body(84852.0))
+    assert direct_vm.run_validator() is True  # same bucket, same stored value
+    direct_vm.clear_mocks(); mock(direct_vm, r"coingecko", cg_body(84860.0))
     assert direct_vm.run_validator() is False
+
+
+def test_bucket_boundary_fails_safe(pg, direct_vm):
+    """Straddling a bucket edge rejects the round (liveness cost, never a wrong price)."""
+    reg(pg)
+    mock(direct_vm, r"coingecko", cg_body(84854.9))   # -> 84850
+    pg.updatePrice("BTC")
+    direct_vm.clear_mocks(); mock(direct_vm, r"coingecko", cg_body(84855.1))  # -> 84860
+    assert direct_vm.run_validator() is False
+
+
+def test_canon_function():
+    import importlib.util, sys
+    # pure helper checks via the contract module source (integer math only)
+    ns = {}
+    src = open("PriceGuard.py").read()
+    start = src.index("def _canon"); end = src.index("def _fmt")
+    ns["CANON_SIG_DIGITS"] = 4
+    exec(src[start:end], ns)
+    c = ns["_canon"]
+    assert c(84848_000000) == 84850_000000
+    assert c(65000_500000) == 65000_000000
+    assert c(100_000000) == 100_000000
+    assert c(999) == 999
+    assert c(1) == 1
+    assert c(123) == 123              # fewer digits than sig -> unchanged
+
+
+def test_both_invalid_agree(pg, direct_vm):
+    reg(pg)
+    mock(direct_vm, r"coingecko", "oops", status=500)
+    pg.updatePrice("BTC")
+    assert direct_vm.run_validator() is True
+
+
+def test_max_deviation_between_sources_rejected(pg, direct_vm):
+    reg(pg, SRC_TWO, min_sources=2, dev=100)  # 1%
+    mock(direct_vm, r"coingecko", cg_body(65000))
+    mock(direct_vm, r"binance", json.dumps({"price": "70000"}))
+    pg.updatePrice("BTC")
+    assert pg.getLastError("BTC")["reason"] == "sources disagree"
 
 def test_http_error_is_invalid_not_price(pg, direct_vm):
     reg(pg)
