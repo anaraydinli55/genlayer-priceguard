@@ -69,8 +69,7 @@ genlayer write CONTRACT updatePrice --args BTC3
 - Host not on the allowlist is rejected: `0xc958ff0b64190f433855533331ae940eebe5ba7586f423fca478db7f14b8056b`
 - `min_sources` enforced (one source returned HTTP 401, no price stored): `0x4df6c39b15398bab05dba3ea7656276913e94045991b206be7e8689f0618c539`
 
-v2 note: these hashes belong to the superseded v2 contract. See "v3 evidence" below for the
-submitted contract.
+v2 note: the hashes above belong to the superseded v2 contract. See "v3 evidence" below.
 
 ## v3 evidence (Bradbury)
 Contract: `0x88e58aef1f074121c69B196607D51323CDb758AD`
