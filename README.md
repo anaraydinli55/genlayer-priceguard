@@ -21,7 +21,7 @@ bound. Invalid data never becomes a price.
 
 ## Deployment
 - Network: GenLayer Bradbury Testnet (chain ID 4221)
-- Contract (v3): `0x88e58aef1f074121c69B196607D51323CDb758AD`
+- Contract (v3, the submission): `0x88e58aef1f074121c69B196607D51323CDb758AD`
 - Explorer: https://explorer-bradbury.genlayer.com/address/0x88e58aef1f074121c69B196607D51323CDb758AD
 - Deployment tx: `0x6e869dc29cdcde6d230400a2396b589564117eebda81cbf067290b3dd0ce81c4`
 - Previous v2 contract (superseded, not the submission): `0x50A6Af0F70426F7c94c44e147A505315aFdC8855`
@@ -73,5 +73,29 @@ v2 note: these hashes belong to the superseded v2 contract. See "v3 evidence" be
 submitted contract.
 
 ## v3 evidence (Bradbury)
-Deployed contract, deploy tx and round hashes are added here after redeploy (see the
-Bradbury proof list in the contribution notes).
+Contract: `0x88e58aef1f074121c69B196607D51323CDb758AD`
+
+Every transaction below is `ACCEPTED` / `FINISHED_WITH_RETURN`, and in each round all 5 validators
+voted AGREE with the same `validatorResultHash` (exact agreement on the canonical result).
+
+| Case | Tx | Observed result |
+|---|---|---|
+| 3-source update (BTC3, min_sources=2) | `0xe109f5a1eb541d671f831ca6f0bd7cb34fd0dc49f0cad8061de7b3feb2c32fbd` | `getPrice`: price_micro `81850000000` (canonical, 4 significant digits), sources `2` (= min_sources) |
+| 3 sources, tight deviation limit (BTCDEV, max_dev_bps=1) | `0xc6425a5a0069513e03e361fc9c3ccd308a61ae1c7efbc861dc95bde111cebf99` | status ok (exchanges were within 0.01% of each other) |
+| min_sources not met (BTCMIN, one source has a wrong path) | `0x5b8cadf096d72696fbc025828438d498e7f408ebc9a32e5cefed8310acec81a7` | status invalid, `getLastError`: "too few valid sources", no price stored |
+| Sources disagree (BTCDIV, synthetic) | `0xeb980f5d2f700b61c81fcb526d84e67272b8e1b83eb6c2433b5a3cf4bc7064de` | status invalid, `getLastError`: "sources disagree", `getPrice` returns "Price not found" |
+| Host not allowlisted (EVIL1) | `0xc268322177efdee9e18b51119784bbc7caae3c47dbb242fc11c94aad040d7276` | registration rejected, `getAsset` returns `{}` |
+
+Asset registration txs: BTCDEV `0xf31006890562125583eb0a1f02d467975803e92cd37638cb848d7d55b9e98472`,
+BTCMIN `0x89c12450b7ca6938212aeb8dd58487637f5e8b1564f9303b7e424415915725d3`,
+BTCDIV `0x865bbbaf572deac04d67a77481aed4b62a06c8acc26cbc637e5eab71e26a5731`.
+
+Notes and limits:
+- BTCDIV is a synthetic test: its two "sources" are the BTC and ETH spot endpoints of the same
+  exchange, used only to force a real cross-source disagreement on-chain.
+- The bucket-edge case (validators landing on opposite sides of a canonical bucket) is covered by
+  local tests (`test_bucket_boundary_fails_safe`), not demonstrated on-chain.
+- The LLM fallback (empty `path`) is still untested.
+- The text stored in `getLastError` is diagnostic only; it never influences a stored price.
+- The genlayer CLI sometimes reports a successfully processed write as "reverted". This evidence
+  only lists transactions whose receipt shows ACCEPTED, plus state read back with view calls.
